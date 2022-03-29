@@ -7,5 +7,5 @@ trained_mlpae
 __pycache__/
 data/
 docker_stderror
-wanb/
+wandb/
 logs/

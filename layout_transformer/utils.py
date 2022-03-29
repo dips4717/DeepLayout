@@ -31,18 +31,23 @@ def gen_colors(num_colors):
 
 
 @torch.no_grad()
-def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
+def sample(model, x, steps, z=None, temperature=1.0, sample=False, top_k=None):
     """
     take a conditioning sequence of indices in x (of shape (b,t)) and predict the next token in
     the sequence, feeding the predictions back into the model each time. Clearly the sampling
     has quadratic complexity unlike an RNN that is only linear, and has a finite context window
     of block_size, unlike an RNN that has an infinite context window.
     """
-    block_size = model.module.get_block_size() if hasattr(model, "module") else model.getcond_block_size()
+    # block_size = model.module.get_block_size() if hasattr(model, "module") else model.getcond_block_size()
+    block_size = model.module.get_block_size() if hasattr(model, "module") else model.get_block_size()
+
     model.eval()
     for k in range(steps):
         x_cond = x if x.size(1) <= block_size else x[:, -block_size:]  # crop context if needed
-        logits, _ = model(x_cond)
+        if z is None:
+            logits, _ = model(x_cond)
+        else:
+            logits, _ = model(x_cond, z)
         # pluck the logits at the final step and scale by temperature
         logits = logits[:, -1, :] / temperature
         # optionally crop probabilities to only the top k options
