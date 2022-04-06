@@ -1,7 +1,8 @@
 # --------------------------------------------
 # Executable and its arguments
 executable     = /user/HS103/dm0051/anaconda3/envs/pytorch11cuda113/bin/python
-arguments      =  $ENV(PWD)/main_conditional.py --freeze_search_model False --search_loss True
+#arguments      =  $ENV(PWD)/main_conditional.py --mode 'unconditional' --server 'condor' --lr_decay_every 15 
+arguments      =  $ENV(PWD)/main.py --ffnet 'linear' --server 'condor' --lr_decay_every 15
 
 # ---------------------------------------------------
 # Universe (vanilla, docker)
@@ -25,13 +26,13 @@ environment = "mount=$ENV(PWD), mount=/vol/research/projectSpaceDipu/"
 # Requirements for the Job (Requirements are explained in further detail in example09.submit_file)
 # NOTE: HasDocker has been omitted
 # NOTE: HasDocker has been omitted
-requirements =  (CUDACapability >= 5) && (CUDAGlobalMemoryMb > 10000) && (CUDAGlobalMemoryMb <  49000)
+requirements =  (CUDACapability >= 5) && (CUDAGlobalMemoryMb > 14000) && (CUDAGlobalMemoryMb <  49000)
 #requirements = (CUDAGlobalMemoryMb > 4500) && (CUDAGlobalMemoryMb <  17000) && \
 #				(CUDACapability > 2.0)
 
 # --------------------------------------
 # Resources
-+GPUMem          = 10GB
++GPUMem          = 14000
 request_GPUs     = 1
 request_CPUs     = 4
 request_memory   = 32G

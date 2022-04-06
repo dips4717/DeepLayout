@@ -9,9 +9,7 @@ from gpt2_activations import  ACT2FN
 class Conv1D(nn.Module):
     """
     1D-convolutional layer as defined by Radford et al. for OpenAI GPT (and also used in GPT-2).
-
     Basically works like a linear layer but the weights are transposed.
-
     Args:
         nf (:obj:`int`): The number of output features.
         nx (:obj:`int`): The number of input features.
@@ -214,9 +212,9 @@ class Block(nn.Module):
     def __init__(self, n_ctx, config, scale=False):
         super().__init__()
         nx = config.n_embd
-        self.ln_1 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
+        self.ln_1 = nn.LayerNorm(nx)
         self.attn = Attention(nx, n_ctx, config, scale)
-        self.ln_2 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
+        self.ln_2 = nn.LayerNorm(nx)
         self.mlp = MLP(4 * nx, config)
 
     def forward(
@@ -238,6 +236,35 @@ class Block(nn.Module):
 
         outputs = [x] + output_attn[1:]
         return outputs  # x, present, (attentions)
+
+class Block2(nn.Module):
+    """ Same as Block but only returns single tensor instead of list"""
+    def __init__(self, n_ctx, config, scale=False):
+        super().__init__()
+        nx = config.n_embd
+        self.ln_1 = nn.LayerNorm(nx)
+        self.attn = Attention(nx, n_ctx, config, scale)
+        self.ln_2 = nn.LayerNorm(nx)
+        self.mlp = MLP(4 * nx, config)
+
+    def forward(
+        self, x, layer_past=None, attention_mask=None, head_mask=None, use_cache=False, output_attentions=False,
+    ):
+        output_attn = self.attn(
+            self.ln_1(x),
+            layer_past=layer_past,
+            attention_mask=attention_mask,
+            head_mask=head_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+        )
+        a = output_attn[0]  # output_attn: a, present, (attentions)
+
+        x = x + a
+        m = self.mlp(self.ln_2(x))
+        x = x + m
+
+        return x 
 
 class CondBlock(nn.Module):
     def __init__(self, n_ctx, config, scale=False):

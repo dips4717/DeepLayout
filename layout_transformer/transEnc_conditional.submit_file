@@ -1,7 +1,12 @@
 # --------------------------------------------
 # Executable and its arguments
 executable     = /user/HS103/dm0051/anaconda3/envs/pytorch11cuda113/bin/python
-arguments      =  $ENV(PWD)/main.py --batch_size 90 --lr 0.001 --lr_decay_every 15
+# arguments      =  $ENV(PWD)/main_transEnc_conditional.py --agg_type 'AveragePool' --server 'condor' --lr_decay_every 15
+# arguments      =  $ENV(PWD)/main_transEnc_conditional.py --agg_type 'Attention' --server 'condor' --lr_decay_every 15
+# arguments      =  $ENV(PWD)/main_transEnc_conditional.py --agg_type   'MLP' --server 'condor' --lr_decay_every 15
+# arguments      =  $ENV(PWD)/main_transEnc_conditional.py --agg_type 'FirstOut' --server 'condor' --lr_decay_every 15
+
+arguments      =  $ENV(PWD)/main_transEnc_conditional.py --agg_type $(agg_type) --server 'condor' --lr_decay_every 15 --repeat_exp True
 
 # ---------------------------------------------------
 # Universe (vanilla, docker)
@@ -25,13 +30,13 @@ environment = "mount=$ENV(PWD), mount=/vol/research/projectSpaceDipu/"
 # Requirements for the Job (Requirements are explained in further detail in example09.submit_file)
 # NOTE: HasDocker has been omitted
 # NOTE: HasDocker has been omitted
-requirements =  (CUDACapability >= 5) && (CUDAGlobalMemoryMb > 12000) && (CUDAGlobalMemoryMb <  49000)
+requirements =  (CUDACapability >= 5) && (CUDAGlobalMemoryMb > 14000) && (CUDAGlobalMemoryMb <  49000)
 #requirements = (CUDAGlobalMemoryMb > 4500) && (CUDAGlobalMemoryMb <  17000) && \
 #				(CUDACapability > 2.0)
 
 # --------------------------------------
 # Resources
-+GPUMem          = 17000
++GPUMem          = 14000
 request_GPUs     = 1
 request_CPUs     = 4
 request_memory   = 32G
@@ -48,4 +53,4 @@ request_memory   = 32G
 
 # -----------------------------------
 # Queue commands
-queue 1
+queue 1 agg_type in 'MLP', 'Attention', 'FirstOut', 'AveragePool'

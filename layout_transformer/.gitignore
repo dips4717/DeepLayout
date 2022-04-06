@@ -1,6 +1,7 @@
 *.out
 *.error
 *log
+*.log
 runs/
 runs_old/
 trained_mlpae

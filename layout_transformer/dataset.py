@@ -209,12 +209,14 @@ class JSONLayout(Dataset):
 
 
 class RICOLayout(Dataset):
-    def __init__(self, rico_info_fn, split='train', max_length=None, precision=8, pad='Padding'):
+    def __init__(self, rico_info_fn, split='train', max_length=None, precision=8, pad='Padding',
+                inference=False):
         with open(rico_info_fn, "rb") as f:
             rico = pickle.load(f)
         self.info = rico['info']
         self.size = pow(2, precision)
         nclass = len(rico['classname2id'])
+        self.rico_classid2name = {v:k for k,v in rico['classname2id'].items()}
 
         self.rico_category_id_to_contiguous_id = {
                 v:i+self.size for i,v in enumerate(rico['classname2id'].values()) }
@@ -226,14 +228,17 @@ class RICOLayout(Dataset):
         self.eos_token = self.vocab_size - 2      #337  
         self.pad_token = self.vocab_size - 1      # 338 
         self.pad = pad
+        self.inference = inference
         if split=='train':
             ids = rico['train_ids']
         else:
             ids = rico['gallery_uis']
 
         self.data = []
+        self.uxids = []
 
         for id in ids:
+            self.uxids.append(id)
             width, height = self.info[id]['img_size']
             ann_box = self.info[id]['xywh']
             ann_cat = [self.rico_category_id_to_contiguous_id[cid]  for cid in self.info[id]['class_id'] ]
@@ -254,9 +259,11 @@ class RICOLayout(Dataset):
             self.data.append(layout.reshape(-1))
         
         self.max_length = max_length
+        
         if self.max_length is None:
             self.max_length = max([len(x) for x in self.data]) + 2  # bos, eos tokens
-        if self.pad == 'pad':
+        
+        if self.pad == 'Padding':
             self.transform = Padding(self.max_length, self.vocab_size)
         else:
             self.transform = Padding2(self.max_length, self.vocab_size)
@@ -281,8 +288,15 @@ class RICOLayout(Dataset):
 
     def __len__(self):
         return len(self.data)
+    
+    def get_label_name(self,index):
+        if 0 <= index-self.size < len(self.colors):
+            label = self.rico_classid2name[self.contiguous_category_id_to_rico_id[index]]
+        else:
+            label = 'background'
+        return label
 
-    def render(self, layout):
+    def render(self, layout, return_bbox=False):
         img = Image.new('RGB', (256, 256), color=(255, 255, 255))
         draw = ImageDraw.Draw(img, 'RGBA')
         layout = layout.reshape(-1)
@@ -304,13 +318,25 @@ class RICOLayout(Dataset):
 
         # Add border around image
         img = ImageOps.expand(img, border=2)
+        
+        if return_bbox:
+            cat = layout[:,0]
+            cat_names = [self.get_label_name(x) for x in cat]
+            return img, box, cat_names
         return img
+    
+    
 
     def __getitem__(self, idx):
         # grab a chunk of (block_size + 1) tokens from the data
         layout = torch.tensor(self.data[idx], dtype=torch.long)
         layout = self.transform(layout)
-        return layout['x'], layout['y']
+        #print(self.inference)
+        if self.inference:
+            uxid = self.uxids[idx]
+            return layout['x'], layout['y'], uxid
+        else:
+            return layout['x'], layout['y']
 
 
 class RICOLayout_withImage(RICOLayout):
@@ -404,7 +430,7 @@ class RICO_Seq_Box(RICOLayout):
         self.info = rico['info']
         self.size = pow(2, precision)
         nclass = len(rico['classname2id'])
-
+        self.rico_classid2name = {v:k for k,v in rico['classname2id'].items()}
         self.rico_category_id_to_contiguous_id = {
                 v:i+self.size for i,v in enumerate(rico['classname2id'].values()) }
         self.contiguous_category_id_to_rico_id = {v:k for k,v in self.rico_category_id_to_contiguous_id.items()}
@@ -417,7 +443,10 @@ class RICO_Seq_Box(RICOLayout):
 
         self.data = []
         self.uxids = [] 
+        
 
+        
+        
         for id in self.ids:
             self.uxids.append(id)
             width, height = self.info[str(id)]['img_size']
@@ -480,7 +509,7 @@ class RICO_Seq_Box_RandRef(RICOLayout):
         self.info = rico['info']
         self.size = pow(2, precision)
         nclass = len(rico['classname2id'])
-
+        self.rico_classid2name = {v:k for k,v in rico['classname2id'].items()}
         self.rico_category_id_to_contiguous_id = {
                 v:i+self.size for i,v in enumerate(rico['classname2id'].values()) }
         self.contiguous_category_id_to_rico_id = {v:k for k,v in self.rico_category_id_to_contiguous_id.items()}
@@ -539,5 +568,105 @@ class RICO_Seq_Box_RandRef(RICOLayout):
         box_exists = self.data_box[ref_uxid]['box_exists']
         n_boxes = self.data_box[ref_uxid]['n_boxes'] 
         label_ids = torch.LongTensor(self.data_box[ref_uxid]['label_ids'])
+
+        return layout['x'], layout['y'], uxid, ref_uxid, ref_layout['x'], boxes, box_exists, n_boxes, label_ids
+
+
+
+class RICO_Seq_Box_SimilarRef(RICOLayout):
+    """
+        Same as RICO_Seq_Box but sample a random UX for search model.
+    
+    """
+
+    def __init__(self, rico_info_fn, ann_file, max_length=None, precision=8, ref_index=None):
+        with open(ann_file, 'rb') as f:
+            data_box = pickle.load(f)
+        
+        with open('data/mlpae_results.pkl', 'rb') as f:
+            self.retrieval = pickle.load(f)
+
+        with open(rico_info_fn, "rb") as f:
+            rico = pickle.load(f)
+
+        self.data_box = data_box
+        self.ids = list(data_box.keys())        
+        self.info = rico['info']
+        self.size = pow(2, precision)
+        nclass = len(rico['classname2id'])
+        self.rico_classid2name = {v:k for k,v in rico['classname2id'].items()}
+        self.rico_category_id_to_contiguous_id = {
+                v:i+self.size for i,v in enumerate(rico['classname2id'].values()) }
+        self.contiguous_category_id_to_rico_id = {v:k for k,v in self.rico_category_id_to_contiguous_id.items()}
+        
+        self.colors = gen_colors(nclass)
+        self.vocab_size = self.size + nclass + 3  # bos, eos, pad tokens # 256+80+3 = 339
+        self.bos_token = self.vocab_size - 3      #336
+        self.eos_token = self.vocab_size - 2      #337  
+        self.pad_token = self.vocab_size - 1      # 338 
+
+        self.data = []
+        self.uxids = [] 
+        self.ref_index = ref_index
+        
+        #for id in self.ids:
+        for id in self.retrieval.keys():
+            self.uxids.append(id)
+            width, height = self.info[str(id)]['img_size']
+            ann_box = self.info[str(id)]['xywh']
+            ann_cat = [self.rico_category_id_to_contiguous_id[cid]  for cid in self.info[str(id)]['class_id'] ]
+
+            # Sort boxes
+            ann_box = np.array(ann_box).astype(float)
+            ind = np.lexsort((ann_box[:, 0], ann_box[:, 1]))
+            ann_box = ann_box[ind]
+
+            # Discretize boxes
+            ann_box = self.quantize_box(ann_box, width, height)
+
+            # Append the categories
+            ann_cat = np.array(ann_cat)
+            layout = np.concatenate([ann_cat.reshape(-1, 1), ann_box], axis=1)
+
+            # Flatten and add to the dataset
+            self.data.append(layout.reshape(-1))
+        
+        self.max_length = max_length
+        if self.max_length is None:
+            self.max_length = max([len(x) for x in self.data]) + 2  # bos, eos tokens
+        self.transform = Padding(self.max_length, self.vocab_size)
+
+    def __len__(self):
+        return len( self.retrieval.keys())        
+        
+    def __getitem__(self, idx):
+          
+         # Data for Seq2Seq model
+        layout = torch.tensor(self.data[idx], dtype=torch.long)
+        layout = self.transform(layout)
+        uxid = self.uxids[idx]
+
+        
+        ref_uxid_pool = self.retrieval[uxid]
+        if self.ref_index is not None:
+            ref_uxid = ref_uxid_pool[self.ref_index]
+        else:
+            ref_uxid = random.choice(ref_uxid_pool)
+        ref_idx = self.uxids.index(ref_uxid)
+
+        # print(type(ref_uxid))
+        # print(ref_idx)
+        # print(type(uxid))
+        
+
+        ref_layout = torch.tensor(self.data[ref_idx], dtype=torch.long)
+        ref_layout = self.transform(ref_layout)
+
+
+        # Data for MLP-AE
+        boxes = self.data_box[int(ref_uxid)] ['boxes_cs']    
+        box_exists = self.data_box[int(ref_uxid)]['box_exists']
+        n_boxes = self.data_box[int(ref_uxid)]['n_boxes'] 
+        label_ids = torch.LongTensor(self.data_box[int(ref_uxid)]['label_ids'])
 
         return layout['x'], layout['y'], uxid, ref_uxid, ref_layout['x'], boxes, box_exists, n_boxes, label_ids

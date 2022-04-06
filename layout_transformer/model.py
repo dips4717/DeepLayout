@@ -14,9 +14,9 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from gpt2 import CondBlock2, Conv1D
+from gpt2 import Block2 as Block_conv
 
 # transformer = nn.Transformer()
-
 logger = logging.getLogger(__name__)
 
 
@@ -136,10 +136,13 @@ class GPT_conditional(nn.Module):
 
         x = self.ln_f(x)
         logits = self.head(x)
+        logits = logits.contiguous()
+        
 
         # if we are given some desired targets also calculate the loss
         loss = None
         if targets is not None:
+            targets = targets.contiguous()
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=pad_token)
 
         return logits, loss
@@ -221,7 +224,14 @@ class GPT(nn.Module):
         self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
         self.drop = nn.Dropout(config.embd_pdrop)
         # transformer
-        self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        if not(hasattr(config,'ffnet')) or config.ffnet == 'linear':
+            self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
+        elif config.ffnet == 'conv':
+            self.blocks = nn.Sequential(*[Block_conv(n_ctx=config.block_size, config=config) for _ in range(config.n_layer)])
+        else:
+            raise(f'No FeedForward network named {config.ffnet}')
+        #print(f'Blocks initialized with {config.ffnet} type FeedForward network')    
+        
         # decoder head
         self.ln_f = nn.LayerNorm(config.n_embd)
         self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
@@ -254,7 +264,7 @@ class GPT(nn.Module):
         # separate out all parameters to those that will and won't experience regularizing weight decay
         decay = set()
         no_decay = set()
-        whitelist_weight_modules = (torch.nn.Linear, )
+        whitelist_weight_modules = (torch.nn.Linear, Conv1D  )
         blacklist_weight_modules = (torch.nn.LayerNorm, torch.nn.Embedding)
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():

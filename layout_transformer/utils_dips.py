@@ -3,6 +3,9 @@ from scipy.optimize import linear_sum_assignment
 import numpy as np
 import torch
 import os
+import torch.nn.functional as F
+from matplotlib import pyplot as plt 
+from PIL import Image
 
 def pickle_save(fn,obj):
     with open(fn, 'wb') as f:
@@ -27,6 +30,45 @@ def generate_square_subsequent_mask(sz,device):
     mask = (torch.triu(torch.ones((sz, sz), device=device)) == 1).transpose(0, 1)
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
+
+def top_k_logits(logits, k):
+    v, ix = torch.topk(logits, k)
+    out = logits.clone()
+    out[out < v[:, [-1]]] = -float('Inf')
+    return out
+
+@torch.no_grad()
+def sample_transEnc_conditional(model, x, steps, seq_all=None, temperature=1.0, sample=False, top_k=None, inference=False):
+    """
+    take a conditioning sequence of indices in x (of shape (b,t)) and predict the next token in
+    the sequence, feeding the predictions back into the model each time. Clearly the sampling
+    has quadratic complexity unlike an RNN that is only linear, and has a finite context window
+    of block_size, unlike an RNN that has an infinite context window.
+    """
+    # block_size = model.module.get_block_size() if hasattr(model, "module") else model.getcond_block_size()
+    block_size = model.decoder.module.get_block_size() if hasattr(model, "module") else model.decoder.get_block_size()
+
+    model.eval()
+    for k in range(steps):
+        x_cond = x if x.size(1) <= block_size else x[:, -block_size:]  # crop context if needed
+        logits, _,_ = model(x_cond, seq_all=seq_all, inference=inference)
+        
+        # pluck the logits at the final step and scale by temperature
+        logits = logits[:, -1, :] / temperature
+        # optionally crop probabilities to only the top k options
+        if top_k is not None:
+            logits = top_k_logits(logits, top_k)
+        # apply softmax to convert to probabilities
+        probs = F.softmax(logits, dim=-1)
+        # sample from the distribution or take the most likely
+        if sample:
+            ix = torch.multinomial(probs, num_samples=1)
+        else:
+            _, ix = torch.topk(probs, k=1, dim=-1)
+        # append to the sequence and continue
+        x = torch.cat((x, ix), dim=1)
+
+    return x
 
 
 def create_mask(src, tgt, PAD_IDX, device):
@@ -161,3 +203,66 @@ def centerscale2box(center_scale):
     y1 = center_y - scale_y / 2; y2 = center_y + scale_y / 2
     box = np.array([x1, y1, x2, y2])
     return box 
+
+def plot_retrieved_images_and_uis(sort_inds, q_fnames, g_fnames, avgIouArray=None, avgPixAccArray=None):
+    
+    base_im_path = '/mnt/amber/scratch/Dipu/RICO/combined/'
+    base_ui_path = '/mnt/amber/scratch/Dipu/RICO/semantic_annotations/'
+    
+    for i in range((sort_inds.shape[0])): #range(1): 
+#    for i in  range(2):    
+        if i == 10:
+            break
+        q_path = base_im_path + q_fnames[i] + '.jpg'
+        q_img  =  Image.open(q_path).convert('RGB')
+        q_ui_path = base_ui_path + q_fnames[i] + '.png'
+        q_ui = Image.open(q_ui_path).convert('RGB')
+        
+        fig, ax = plt.subplots(2,6, figsize=(30, 12), constrained_layout=True)
+        plt.setp(ax,  xticklabels=[],  yticklabels=[])
+        fig.suptitle('Query-%s)'%(i), fontsize=20)
+        fig = plt.figure(1)
+#        fig.set_size_inches(30, 12)
+#        plt.subplots_adjust(bottom = 0.1, top=10)
+        #f1 = fig.add_subplot(2,6,1)
+        
+        ax[0,0].imshow(q_ui)
+        ax[0,0].axis('off')
+        ax[0,0].set_title('Query: %s '%(i) + q_fnames[i] + '.png')
+        ax[1,0].imshow(q_img)
+        ax[1,0].axis('off') 
+        ax[1,0].set_title('Query: %s '%(i) + q_fnames[i] + '.jpg')
+        #plt.pause(0.1)
+     
+        for j in range(5):
+            path = base_im_path + g_fnames[sort_inds[i][j]] + '.jpg'
+           # print(g_fnames[sort_inds[i][j]] )
+            im = Image.open(path).convert('RGB')
+            ui_path = base_ui_path + g_fnames[sort_inds[i][j]] + '.png'
+            #print(g_fnames[sort_inds[i][j]]) 
+            ui = Image.open(ui_path).convert('RGB')
+            
+            ax[0,j+1].imshow(ui)
+            ax[0,j+1].axis('off')
+            if avgIouArray is None:
+                ax[0,j+1].set_title('Rank: %s  '%(j+1)  + g_fnames[sort_inds[i][j]])            
+            else: 
+                ax[0,j+1].set_title('Rank: %s  '%(j+1)  + g_fnames[sort_inds[i][j]] \
+                                     + '.png\nAvg IoU: %.3f'%(avgIouArray[i][j])
+                                     + '\nAvg PixAcc: %.3f'%(avgPixAccArray[i][j]))
+           
+            
+            ax[1,j+1].imshow(im)
+            ax[1,j+1].axis('off')
+            ax[1,j+1].set_title('Rank: %s  '%(j+1) + g_fnames[sort_inds[i][j]] + '.jpg')
+            
+#        directory =  'Retrieval_Results_Iou_PixAcc/{}/Gallery_Only/'.format(model_name)
+        directory =  'runs/RICO_Image/retrievals/'
+        if not os.path.exists(directory):
+            os.makedirs(directory)  
+            
+        plt.savefig( directory + str(i) + '.png')
+       # plt.pause(0.1)
+        plt.close()
+        #print('Wait')
+        print('Plotting the retrieved images: {}'.format(i))

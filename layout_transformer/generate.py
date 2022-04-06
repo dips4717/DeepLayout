@@ -8,8 +8,10 @@ Created on Fri Dec 17 11:59:49 2021
 
 import os
 import argparse
+from unittest import result
 import torch
 from dataset import MNISTLayout, JSONLayout, RICOLayout
+from utils_dips import pickle_save
 #from layout_transformer.dataset import RICOLayout
 from model import GPT, GPTConfig
 from trainer import Trainer, TrainerConfig
@@ -18,6 +20,8 @@ from torch.utils.data.dataloader import DataLoader
 
 from utils import sample
 import torch.nn.functional as F
+from collections import defaultdict
+from matplotlib import pyplot as plt
 
 def argument_parser():
     parser = argparse.ArgumentParser('Layout Transformer')
@@ -63,7 +67,7 @@ def argument_parser():
 
 args = argument_parser()
 set_seed(args.seed)
-device = 'cuda:0'
+device = 'cuda:3'
 args.exp_name = 'runs/LayoutTransformer/layoutransformer_bs40_lr0.001_lrdecay10'
 split = 'test' # 'test'
 
@@ -84,8 +88,9 @@ log_dir = os.path.join(args.log_dir, 'LayoutTransformer', args.exp_name )
 samples_dir = os.path.join(log_dir, "samples")
 ckpt_dir = os.path.join(log_dir, "checkpoints")
 
-train_dataset = RICOLayout(args.rico_info, split='train', precision=args.precision)
-valid_dataset = RICOLayout(args.rico_info, split='test', max_length=train_dataset.max_length, precision=args.precision)
+train_dataset = RICOLayout(args.rico_info, split='train', precision=args.precision, inference=True)
+valid_dataset = RICOLayout(args.rico_info, split='test', max_length=train_dataset.max_length, precision=args.precision,
+                            inference=True)
 
 mconf = GPTConfig(train_dataset.vocab_size, train_dataset.max_length,
                       n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd)  # a GPT-1
@@ -103,68 +108,86 @@ tconf = TrainerConfig(max_epochs=args.epochs,
 
 
 model.load_state_dict(pt_model['state_dict'])
-
+model.eval()
 dataset_ = train_dataset if split =='train' else valid_dataset
-loader = DataLoader(dataset_, shuffle=True, pin_memory=True,
+loader = DataLoader(dataset_, shuffle=False, pin_memory=True,
                 batch_size=tconf.batch_size,
                 num_workers=tconf.num_workers)
 
+all_results = defaultdict(dict)
 pbar = enumerate(loader)
-for it, (x, y) in pbar:
-    if it == 100:
-        break
+
+with torch.no_grad(): 
+    for it, (x, y, uxid) in pbar:
+        if it == 1000:
+            break
+        if it%50==0:
+            print(f'done {it} iterations')
+            
+        
+        x_cond = x.to(device) 
+        
+        uxid = str(uxid[0])
+        gt_layouts= x.detach().cpu().numpy()
+        gt_layouts, gt_boxes, gt_catnames = train_dataset.render(gt_layouts, return_bbox=True)
+        
+        # Reconstruction
+        logits, _ = model(x_cond)
+        probs = F.softmax(logits, dim=-1)
+        _, y = torch.topk(probs, k=1, dim=-1)
+        layouts_recon = torch.cat((x_cond[:,:1], y[:,:, 0]), dim=1).detach().cpu().numpy()
+        recon_layouts, recon_boxes, recon_cat_names = train_dataset.render(layouts_recon, return_bbox=True) 
     
-    x_cond = x.to(device) 
-      
-    gt_layouts= x.detach().cpu().numpy()
-    gt_layouts = [train_dataset.render(layout) for layout in gt_layouts]
+        # Generation with First element
+        layouts_firstel = sample(model, x_cond[:,:6], steps=train_dataset.max_length,
+                                 temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
+        layouts_firstel, firstel_boxes, firstel_catnames = train_dataset.render(layouts_firstel, return_bbox=True)
+        
     
-    # Reconstruction
-    logits, _ = model(x_cond)
-    probs = F.softmax(logits, dim=-1)
-    _, y = torch.topk(probs, k=1, dim=-1)
-    layouts_recon = torch.cat((x_cond[:, :1], y[:, :, 0]), dim=1).detach().cpu().numpy()
-    recon_layouts = [train_dataset.render(layout) for layout in layouts_recon]
-
-    # Generation with First element
-    layouts_firstel = sample(model, x_cond[:, :6], steps=train_dataset.max_length,                                temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
-    layouts_firstel = [train_dataset.render(layout) for layout in layouts_firstel] 
+        # Generation with bos only
+        layouts_bos = sample(model, x_cond[:,:1], steps=train_dataset.max_length,
+                                    temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
+        layouts_bos, bos_boxes, bos_catnames = train_dataset.render(layouts_bos,return_bbox=True)  
     
-
-    # Generation with bos only
-    layouts_bos = sample(model, x_cond[:, :1], steps=train_dataset.max_length,
-                                temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
-    layouts_bos = [train_dataset.render(layout) for layout in layouts_bos] 
-
-    # Generation with partial
-    layouts_partial = sample(model, x_cond[:, :26], steps=train_dataset.max_length, 
-                                temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
-    layouts_partial = [train_dataset.render(layout) for layout in layouts_partial] 
-
-
-    #Plot in a simple figure
-    from matplotlib import pyplot as plt
+        # Generation with partial
+        layouts_partial = sample(model, x_cond[:,:26], steps=train_dataset.max_length, 
+                                    temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
+        layouts_partial, partial_boxes, partial_catnames = train_dataset.render(layouts_partial, return_bbox=True)
     
-    fig, ax = plt.subplots(1,5, figsize=(25, 12), constrained_layout=True)
-    plt.setp(ax,  xticklabels=[],  yticklabels=[])
-    ax[0].imshow(gt_layouts[0])
-    ax[0].set_title('GroundTruth')
-
-    ax[1].imshow(recon_layouts[0])
-    ax[1].set_title('Reconstruction')
-
-    ax[2].imshow(layouts_bos[0])
-    ax[2].set_title('Gen-BoS')
-
-    ax[3].imshow(layouts_firstel[0])
-    ax[3].set_title('Gen-FirstEle.')
-
-
-    ax[4].imshow(layouts_partial[0])
-    ax[4].set_title('Gen-Partial-(5 Elem.)')
-
-    plt.savefig(f'{save_dir_gen}/{str(it)}_plot.png')
+        cats_and_boxes = {'gbb': gt_boxes, 'gc': gt_catnames,
+                           'rbb' : recon_boxes, 'rc': recon_cat_names,
+                           'fbb': firstel_boxes, 'fc':firstel_catnames,
+                           'bbb': bos_boxes, 'bc':bos_catnames,
+                           'pbb': partial_boxes, 'pc':partial_catnames}
+        all_results[uxid] = cats_and_boxes
     
+    
+        if it <=100:
+            #Plot in a simple figure
+            fig, ax = plt.subplots(1,5, figsize=(25, 12), constrained_layout=True)
+            plt.setp(ax,  xticklabels=[],  yticklabels=[])
+            ax[0].imshow(gt_layouts)
+            ax[0].set_title('GroundTruth')
+    
+            ax[1].imshow(recon_layouts)
+            ax[1].set_title('Reconstruction')
+    
+            ax[2].imshow(layouts_bos)
+            ax[2].set_title('Gen-BoS')
+    
+            ax[3].imshow(layouts_firstel)
+            ax[3].set_title('Gen-FirstEle.')
+    
+    
+            ax[4].imshow(layouts_partial)
+            ax[4].set_title('Gen-Partial-(5 Elem.)')
+    
+            plt.savefig(f'{save_dir_gen}/{uxid}_plot.png')
+    
+    result_dir = args.exp_name + '/results'
+    os.makedirs(result_dir, exist_ok=True)
+    
+    pickle_save(result_dir+f'/gen_result_{split}.pkl', all_results)    
    
 
 

@@ -206,7 +206,7 @@ class Trainer:
             if self.config.ckpt_dir is not None and good_model:
                 best_loss = test_loss
                 self.save_checkpoint(epoch, test_loss=test_loss, train_loss=train_loss)
-
+                print(f'Saved checkpoint at epoch {epoch}')
             # sample from the model
             if self.config.samples_dir is not None and (epoch+1) % self.config.sample_every == 0:
                 # import ipdb; ipdb.set_trace()
