@@ -14,7 +14,6 @@ import torch
 from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
 from gpt2 import Conv1D
-from utils import sample
 from utils_dips import AverageMeter
 logger = logging.getLogger(__name__)
 
@@ -150,7 +149,6 @@ class Trainer:
                                 batch_size=self.config.batch_size,
                                 num_workers=self.config.num_workers)
             losses = []
-
             pbar = tqdm(enumerate(loader), total=len(loader)) if is_train else enumerate(loader)
             
             for it, (input_data) in pbar:
@@ -166,7 +164,12 @@ class Trainer:
                 
                 # forward the model
                 with torch.set_grad_enabled(is_train):
-                    logits, loss, z = self.model(x, pad_token=pad_token)
+                    # if (is_train & self.args.dual_forward):
+                    #    loss = self.model.forward_dual(x, pad_token=pad_token)
+                    if (is_train & self.args.dropseq_forward):
+                        logits, loss, z = self.model.forward_dropseq(x, pad_token=pad_token)
+                    else:
+                        logits, loss, z = self.model(x, pad_token=pad_token)
                     loss = loss.mean()
                     losses.append(loss.item())
 
@@ -249,7 +252,7 @@ class Trainer:
                 sample_random_layouts = [self.train_dataset.render(layout) for layout in layouts]
       
                 # samples - deterministic
-                layouts = sample(self.model, x, seq_all=x, steps=self.train_dataset.max_length,
+                layouts = sample(self.model, x[:, :6], seq_all=x, steps=self.train_dataset.max_length,
                                 temperature=1.0, sample=False, top_k=None, pad_token=pad_token).detach().cpu().numpy()
                 sample_det_layouts = [self.train_dataset.render(layout) for layout in layouts]
 
@@ -396,8 +399,8 @@ def sample(model, x, steps, seq_all=None, temperature=1.0, sample=False, top_k=N
 
     model.eval()
     for k in range(steps):
-        x = x if x.size(1) <= block_size else x[:, -block_size:]  # crop context if needed
-        logits, _,_ = model.forward_sample(x, seq_all, pad_token=pad_token)
+        x_cond = x if x.size(1) <= block_size else x[:, -block_size:]  # crop context if needed
+        logits, _,_ = model.forward_sample(x_cond, seq_all, pad_token=pad_token)
         
         # pluck the logits at the final step and scale by temperature
         logits = logits[:, -1, :] / temperature

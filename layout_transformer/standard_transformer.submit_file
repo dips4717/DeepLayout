@@ -25,7 +25,7 @@ environment = "mount=$ENV(PWD), mount=/vol/research/projectSpaceDipu/"
 # Requirements for the Job (Requirements are explained in further detail in example09.submit_file)
 # NOTE: HasDocker has been omitted
 # NOTE: HasDocker has been omitted
-requirements =  (CUDACapability >= 5) && (CUDAGlobalMemoryMb > 10000) && (CUDAGlobalMemoryMb <  49000)
+requirements =  (CUDACapability >= 5) && (CUDAGlobalMemoryMb > 23000) && (CUDAGlobalMemoryMb <  49000)
 #requirements = (CUDAGlobalMemoryMb > 4500) && (CUDAGlobalMemoryMb <  17000) && \
 #				(CUDACapability > 2.0)
 

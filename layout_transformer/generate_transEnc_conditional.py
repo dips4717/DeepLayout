@@ -9,7 +9,7 @@ from model_transEnc_GPTdecoder import TransformerEncoder_GPTConditional
 from trainer_transEnc_conditional import Trainer, TrainerConfig
 from utils import set_seed
 from utils_dips import pickle_load, pickle_save, str2bool
-from utils_dips import sample_transEnc_conditional
+from trainer_transEnc_conditional import sample
 from torch.utils.data.dataloader import DataLoader
 from collections import defaultdict
 from matplotlib import pyplot as plt
@@ -19,7 +19,7 @@ import torch.nn.functional as F
 
 parser = argparse.ArgumentParser('Conditional Layout Transformer')
 
-parser.add_argument("--device", type=str, default='cuda:0')
+parser.add_argument("--device", type=str, default='cuda:1')
 parser.add_argument("--log_dir", default="runs", help="/path/to/logs/dir")
 parser.add_argument("--evaluate", type=str2bool, default=False)
 parser.add_argument("--mode", type=str, default='conditional', choices=['conditional', 'unconditional'])
@@ -46,15 +46,15 @@ parser.add_argument('--final_iters', type=int, default=0, help="cosine lr final 
 parser.add_argument('--sample_every', type=int, default=1, help="sample every epoch")
 
 # Architecture/
-parser.add_argument('--n_layer', default=2, type=int) # 6
+parser.add_argument('--n_layer', default=6, type=int) # 6
 parser.add_argument('--n_embd', default=512, type=int)
 parser.add_argument('--n_head', default=8, type=int)
-parser.add_argument('--agg_type', default='Attention', type=str, 
+parser.add_argument('--agg_type', default='AveragePool', type=str, 
                     choices=['Attention', 'MLP', 'AveragePool', 'FirstOut' ])
 
 # Evaluation args
 parser.add_argument('--pair', type=str, default='same', choices=['different', 'same'])
-parser.add_argument('--pt_model_path', type=str, default='runs/TransEnc_ConditionalDec/TransEnc_ConditionalDec_bs40_lr0.001_lrdecay15_aggtypeAttention' )
+parser.add_argument('--pt_model_path', type=str, default='runs/TransEnc_ConditionalDec/TransEnc_ConditionalDec_bs40_lr0.001_lrdecay15_aggtypeAveragePool_seed42_0406_srcAll' )
 parser.add_argument('--split', default='test', type=str)
 args = parser.parse_args()
 
@@ -70,9 +70,9 @@ save_dir_gen = f'{args.pt_model_path}/{split}_gen_images_pair_{pair}'
 if not os.path.exists(save_dir_gen):
     os.makedirs(save_dir_gen, exist_ok=True)
 
-train_dataset = RICOLayout(args.rico_info, split='train', precision=args.precision, pad='Padding', inference=True)
-valid_dataset = RICOLayout(args.rico_info, split='gallery', max_length=train_dataset.max_length, precision=args.precision, pad='Padding',inference=True)
-query_dataset = RICOLayout(args.rico_info, split='query', max_length=train_dataset.max_length, precision=args.precision, pad='Padding',inference=True)
+train_dataset = RICOLayout(args.rico_info, split='train', precision=args.precision, pad='None', inference=True)
+valid_dataset = RICOLayout(args.rico_info, split='gallery', max_length=train_dataset.max_length, precision=args.precision, pad='None',inference=True)
+query_dataset = RICOLayout(args.rico_info, split='query', max_length=train_dataset.max_length, precision=args.precision, pad='None',inference=True)
 
 mconf = GPTConfig(train_dataset.vocab_size, train_dataset.max_length,
                   n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd,
@@ -161,27 +161,23 @@ with torch.no_grad():
         recon_layouts, recon_boxes, recon_cat_names = train_dataset.render(layouts_recon, return_bbox=True) 
 
         # Generation with First element
-        layouts_firstel = sample_transEnc_conditional(model, x[:, :6], 
-                                                      seq_all=x, 
-                                                      inference=True, 
+        layouts_firstel = sample(model, x[:, :6],     seq_all=x,                                                       
                                                       steps=train_dataset.max_length,
-                                                      temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
+                                                      temperature=1.0, sample=True, top_k=5, pad_token=pad_token).detach().cpu().numpy()
         layouts_firstel, firstel_boxes, firstel_catnames = train_dataset.render(layouts_firstel, return_bbox=True)
 
         # Generation with bos only
-        layouts_bos = sample_transEnc_conditional(model, x[:, :1],
-                                                  seq_all=x, 
-                                                  inference=True,
+        layouts_bos = sample(model, x[:, :1],
+                                                  seq_all=x,                                                   
                                                   steps=train_dataset.max_length, 
-                                                  temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
+                                                  temperature=1.0, sample=True, top_k=5, pad_token=pad_token).detach().cpu().numpy()
         layouts_bos, bos_boxes, bos_catnames = train_dataset.render(layouts_bos,return_bbox=True)  
 
         # Generation with partial
-        layouts_partial = sample_transEnc_conditional(model, x[:, :26], 
+        layouts_partial = sample(model, x[:, :26], 
                                                       seq_all=x, 
-                                                      steps=train_dataset.max_length, 
-                                                      inference=True,
-                                                      temperature=1.0, sample=True, top_k=5).detach().cpu().numpy()
+                                                      steps=train_dataset.max_length,                                                      
+                                                      temperature=1.0, sample=True, top_k=5, pad_token=pad_token).detach().cpu().numpy()
         layouts_partial, partial_boxes, partial_catnames = train_dataset.render(layouts_partial, return_bbox=True)
 
 

@@ -16,10 +16,11 @@ import torch.nn.functional as F
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Conditional Layout Transformer')
     parser.add_argument("--exp", default="layout", help="mnist_threshold_1")
-    parser.add_argument("--log_dir", default="./runs", help="/path/to/logs/dir")
+    parser.add_argument("--log_dir", default="runs", help="/path/to/logs/dir")
     parser.add_argument("--dataset_name", type=str, default='RICO', choices=['RICO', 'MNIST', 'COCO', 'PubLayNet', 'RICO_Image'])
     parser.add_argument("--device", type=str, default='cuda:0')
-    
+    parser.add_argument("--server", type=str, default='condor', choices=['condor', 'aineko'])
+
     
     # MNIST options
     parser.add_argument("--data_dir", default=None, help="")
@@ -62,8 +63,17 @@ if __name__ == "__main__":
 
 
 args = parser.parse_args()
+# Base working directory
+if args.server == 'condor':
+    args.base_wdir = '/vol/research/projectSpaceDipu/codes/UIGeneration/DeepLayout/layout_transformer/'
+else:
+    args.base_wdir = './'
+args.rico_info = args.base_wdir + 'data/rico.pkl'
+args.log_dir = args.base_wdir + args.log_dir
+
+
 args.exp_name = f'TransformerEncDec_bs{args.batch_size}_lr{args.lr}_lrdecay{args.lr_decay_every}'
-args.log_dir = os.path.join(args.log_dir, 'ConditionalLayoutTransformer', args.exp_name )
+args.log_dir = os.path.join(args.log_dir, 'TransEnc_TransDec', args.exp_name )
 args.samples_dir = os.path.join(args.log_dir, "samples")
 args.ckpt_dir = os.path.join(args.log_dir, "checkpoints")
 args.result_dir = os.path.join(args.log_dir, "results")
@@ -209,32 +219,3 @@ def main(args):
 
 if __name__ == '__main__':
     main(args)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

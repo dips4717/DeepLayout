@@ -17,8 +17,9 @@ if __name__ == "__main__":
     parser.add_argument("--log_dir", default="runs", help="/path/to/logs/dir")
     parser.add_argument("--evaluate", type=str2bool, default=False)
     parser.add_argument("--mode", type=str, default='conditional', choices=['conditional', 'unconditional'])
-    parser.add_argument("--server", type=str, default='aineko', choices=['condor', 'aineko'])
-    parser.add_argument("--repeat_exp", type=str2bool, default=False)
+    parser.add_argument("--server", type=str, default='condor', choices=['condor', 'aineko'])
+    parser.add_argument("--repeat_exp", type=str, default=None)
+    
    
     # Layout / Dataset options
     parser.add_argument("--max_length", type=int, default=128, help="batch size")
@@ -27,9 +28,12 @@ if __name__ == "__main__":
     parser.add_argument('--attribute_order', default='cxywh')
 
     #training options
-    parser.add_argument("--seed", type=int, default=95, help="random seed")
+    parser.add_argument("--seed", type=int, default=42, help="random seed")
     parser.add_argument("--epochs", type=int, default=50, help="number of epochs")
     parser.add_argument("--batch_size", type=int, default=40, help="batch size")
+    parser.add_argument("--dual_forward", type=str2bool, default=False)
+    parser.add_argument("--dropseq_forward", type=str2bool, default=False)
+
 
     # parser.add_argument("--lr", type=float, default=4.5e-06, help="learning rate")
     parser.add_argument("--lr", type=float, default=0.001, help="learning rate")
@@ -41,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument('--sample_every', type=int, default=1, help="sample every epoch")
 
     # Architecture/
-    parser.add_argument('--n_layer', default=2, type=int) # 6
+    parser.add_argument('--n_layer', default=6, type=int) 
     parser.add_argument('--n_embd', default=512, type=int)
     parser.add_argument('--n_head', default=8, type=int)
     parser.add_argument('--agg_type', default='MLP', type=str, 
@@ -63,8 +67,10 @@ if __name__ == "__main__":
     query_dataset = RICOLayout(args.rico_info, split='query', max_length=train_dataset.max_length, precision=args.precision, pad=None)
        
     exp_prefix = 'Un' if args.mode =='unconditional' else ''
-    repeat_prefix = '_Repeat' if args.repeat_exp else ''
-    args.exp_name = f'TransEnc_ConditionalDec_bs{args.batch_size}_lr{args.lr}_lrdecay{args.lr_decay_every}_aggtype{args.agg_type}_seed{args.seed}{repeat_prefix}'
+    repeat_prefix = args.repeat_exp if (args.repeat_exp is not None)  else ''
+    dual_forward_suffix = '_DualForwd' if args.dual_forward else ''
+    dropseq_forward_suffix = '_DropSeq' if args.dropseq_forward else ''
+    args.exp_name = f'TransEnc_ConditionalDec_bs{args.batch_size}_lr{args.lr}_lrdecay{args.lr_decay_every}_aggtype{args.agg_type}{dual_forward_suffix}{dropseq_forward_suffix}'
     args.log_dir = os.path.join(args.log_dir, 'TransEnc_ConditionalDec', args.exp_name)
     samples_dir = os.path.join(args.log_dir, "samples")
     args.ckpt_dir = os.path.join(args.log_dir, "checkpoints")
